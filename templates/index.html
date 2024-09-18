@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Live Stream Recorder</title>
+</head>
+<body>
+    <h1>Record a 15-second Video</h1>
+    <video id="video" autoplay></video>
+    <button id="startBtn">Start Recording</button>
+    <div id="message"></div>
+
+    <script>
+        const video = document.getElementById('video');
+        const startBtn = document.getElementById('startBtn');
+        const messageDiv = document.getElementById('message');
+
+        // Function to get CSRF token
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    // Does this cookie string begin with the name we want?
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+        const csrftoken = getCookie('csrftoken');
+
+        navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+            .then(stream => {
+                video.srcObject = stream;
+                const mediaRecorder = new MediaRecorder(stream);
+                let chunks = [];
+
+                startBtn.addEventListener('click', () => {
+                    mediaRecorder.start();
+                    startBtn.disabled = true;
+                    setTimeout(() => {
+                        mediaRecorder.stop();
+                        startBtn.disabled = false;
+                    }, 15000); // Stop recording after 15 seconds
+                });
+
+                mediaRecorder.ondataavailable = event => {
+                    chunks.push(event.data);
+                };
+
+                mediaRecorder.onstop = () => {
+                    stream.getTracks().forEach(track => track.stop());
+
+                    const blob = new Blob(chunks, { 'type': 'video/webm; codecs=vp8' });
+                    chunks = [];
+                    const formData = new FormData();
+                    formData.append('video', blob);
+
+                    fetch('/upload/', {
+                        method: 'POST',
+                        headers: {
+                            'X-CSRFToken': csrftoken  // Include the CSRF token in the request
+                        },
+                        body: formData
+                    })
+                    .then(response => {
+                        if (response.ok) {
+                            return response.text(); // Assuming the server returns a text response, not JSON
+                        } else {
+                            throw new Error('Upload failed');
+                        }
+                    })
+                    .then(data => {
+                        messageDiv.textContent = data; // Display the server's response
+                        const videoId = data.match(/Video ID: (\d+)/);
+                        if (videoId) {
+                            const playLink = document.createElement('a');
+                            playLink.href = `/play/${videoId[1]}/`;
+                            playLink.textContent = 'Play Video';
+                            messageDiv.appendChild(playLink);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error during fetch', error);
+                        messageDiv.textContent = 'Error uploading video. Please try again later.';
+                    });
+                };
+            })
+            .catch(err => {
+                console.error('Error accessing media devices.', err);
+                messageDiv.textContent = 'Error accessing camera or microphone. Please try again later.';
+            });
+    </script>
+</body>
+</html>
